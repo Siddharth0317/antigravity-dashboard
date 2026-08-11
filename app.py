@@ -497,58 +497,6 @@ if current_session:
                 """
                 st.components.v1.html(tts_html, height=50)
 
-    # Voice Dictation Mic Tool
-    with st.expander("🎙️ Voice Dictation Mic Input"):
-        dictation_html = """
-        <div style="background: #1e1f20; border: 1px solid #37393b; border-radius: 14px; padding: 12px; font-family: sans-serif;">
-            <div style="display: flex; flex-direction: column; gap: 8px;">
-                <button id="mic_btn" onclick="startDictation()" ontouchend="startDictation()" style="background: linear-gradient(135deg, #1a73e8, #0b57d0); color: white; border: none; border-radius: 20px; padding: 10px 20px; font-weight: 500; font-size: 0.95rem; cursor: pointer; min-height: 44px; width: 100%;">
-                    🎙️ Start Mobile Dictation
-                </button>
-                <span id="mic_status" style="color: #c4c7c5; font-size: 0.9rem; text-align: center;">Tap button & speak into microphone...</span>
-            </div>
-            <div id="dictation_output" style="margin-top: 10px; color: #a8c7fa; font-size: 0.95rem; font-style: italic; min-height: 22px; word-break: break-word;"></div>
-        </div>
-
-        <script>
-        function startDictation() {
-            const status = document.getElementById('mic_status');
-            const output = document.getElementById('dictation_output');
-            
-            if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-                status.innerText = '⚠️ Speech recognition not supported on this mobile browser.';
-                return;
-            }
-            
-            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-            const recognition = new SpeechRecognition();
-            recognition.continuous = false;
-            recognition.interimResults = true;
-            recognition.lang = 'en-US';
-            
-            status.innerText = '🎙️ Listening... Speak now!';
-            recognition.start();
-            
-            recognition.onresult = function(event) {
-                let transcript = '';
-                for (let i = event.resultIndex; i < event.results.length; ++i) {
-                    transcript += event.results[i][0].transcript;
-                }
-                output.innerText = transcript;
-            };
-            
-            recognition.onerror = function(event) {
-                status.innerText = '⚠️ Dictation error: ' + event.error;
-            };
-            
-            recognition.onend = function() {
-                status.innerText = '✅ Speech captured!';
-            };
-        }
-        </script>
-        """
-        st.components.v1.html(dictation_html, height=130)
-
     # Quick Action Prompt Chips
     st.caption("⚡ **Quick Actions:**")
     q1, q2, q3, q4 = st.columns(4)

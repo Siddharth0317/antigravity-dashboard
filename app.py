@@ -142,11 +142,34 @@ st.markdown("""
         padding: 6px 16px;
         border-radius: 20px;
         font-size: 0.85rem;
-        font-weight: 600;
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        margin-bottom: 14px;
+    /* Mobile Responsive Optimizations for Phone Web Browsers */
+    @media (max-width: 768px) {
+        .block-container {
+            padding-left: 0.6rem !important;
+            padding-right: 0.6rem !important;
+            padding-top: 0.8rem !important;
+        }
+
+        /* Stacking cards on mobile screens */
+        div[data-testid="column"] {
+            margin-bottom: 6px !important;
+        }
+
+        /* Responsive touch targets for finger taps */
+        .stButton > button {
+            min-height: 46px !important;
+            font-size: 0.95rem !important;
+            width: 100% !important;
+        }
+
+        .stChatInput > div {
+            border-radius: 22px !important;
+            padding: 4px 6px !important;
+        }
+
+        h2 {
+            font-size: 1.35rem !important;
+        }
     }
 </style>
 """, unsafe_allow_html=True)
@@ -454,31 +477,37 @@ if current_session:
                 escaped_text = html_lib.escape(msg.content.replace("\n", " ").replace("'", "\\'"))
                 tts_html = f"""
                 <div style="margin-top: 6px;">
-                    <button onclick="
-                        const msg = new SpeechSynthesisUtterance('{escaped_text}');
-                        window.speechSynthesis.cancel();
-                        window.speechSynthesis.speak(msg);
-                    " style="background: #282a2c; color: #a8c7fa; border: 1px solid #37393b; border-radius: 16px; padding: 4px 12px; font-size: 0.8rem; cursor: pointer;">
+                    <button onclick="playTTS()" ontouchend="playTTS()" style="background: #282a2c; color: #a8c7fa; border: 1px solid #37393b; border-radius: 16px; padding: 6px 14px; font-size: 0.85rem; cursor: pointer; min-height: 36px;">
                         🔊 Read Aloud
                     </button>
-                    <button onclick="window.speechSynthesis.cancel();" style="background: #282a2c; color: #f28b82; border: 1px solid #37393b; border-radius: 16px; padding: 4px 12px; font-size: 0.8rem; cursor: pointer; margin-left: 6px;">
+                    <button onclick="stopTTS()" ontouchend="stopTTS()" style="background: #282a2c; color: #f28b82; border: 1px solid #37393b; border-radius: 16px; padding: 6px 14px; font-size: 0.85rem; cursor: pointer; margin-left: 6px; min-height: 36px;">
                         ⏹️ Stop Audio
                     </button>
                 </div>
+                <script>
+                function playTTS() {{
+                    const msg = new SpeechSynthesisUtterance('{escaped_text}');
+                    window.speechSynthesis.cancel();
+                    window.speechSynthesis.speak(msg);
+                }}
+                function stopTTS() {{
+                    window.speechSynthesis.cancel();
+                }}
+                </script>
                 """
-                st.components.v1.html(tts_html, height=40)
+                st.components.v1.html(tts_html, height=50)
 
     # Voice Dictation Mic Tool
     with st.expander("🎙️ Voice Dictation Mic Input"):
         dictation_html = """
         <div style="background: #1e1f20; border: 1px solid #37393b; border-radius: 14px; padding: 12px; font-family: sans-serif;">
-            <div style="display: flex; align-items: center; gap: 12px;">
-                <button id="mic_btn" onclick="startDictation()" style="background: linear-gradient(135deg, #1a73e8, #0b57d0); color: white; border: none; border-radius: 20px; padding: 8px 18px; font-weight: 500; cursor: pointer;">
-                    🎙️ Start Dictation
+            <div style="display: flex; flex-direction: column; gap: 8px;">
+                <button id="mic_btn" onclick="startDictation()" ontouchend="startDictation()" style="background: linear-gradient(135deg, #1a73e8, #0b57d0); color: white; border: none; border-radius: 20px; padding: 10px 20px; font-weight: 500; font-size: 0.95rem; cursor: pointer; min-height: 44px; width: 100%;">
+                    🎙️ Start Mobile Dictation
                 </button>
-                <span id="mic_status" style="color: #c4c7c5; font-size: 0.9rem;">Click button and speak...</span>
+                <span id="mic_status" style="color: #c4c7c5; font-size: 0.9rem; text-align: center;">Tap button & speak into microphone...</span>
             </div>
-            <div id="dictation_output" style="margin-top: 10px; color: #a8c7fa; font-size: 0.95rem; font-style: italic; min-height: 22px;"></div>
+            <div id="dictation_output" style="margin-top: 10px; color: #a8c7fa; font-size: 0.95rem; font-style: italic; min-height: 22px; word-break: break-word;"></div>
         </div>
 
         <script>
@@ -487,7 +516,7 @@ if current_session:
             const output = document.getElementById('dictation_output');
             
             if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-                status.innerText = '⚠️ Speech recognition not supported in this browser.';
+                status.innerText = '⚠️ Speech recognition not supported on this mobile browser.';
                 return;
             }
             
@@ -518,7 +547,7 @@ if current_session:
         }
         </script>
         """
-        st.components.v1.html(dictation_html, height=110)
+        st.components.v1.html(dictation_html, height=130)
 
     # Quick Action Prompt Chips
     st.caption("⚡ **Quick Actions:**")

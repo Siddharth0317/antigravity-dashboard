@@ -32,7 +32,15 @@ async def handle_ask_user_policy(action_context):
     st.session_state.pending_approval = None
     return approved
 
-async def stream_antigravity_agent(user_message: str, model_name: str = None):
+DEFAULT_SYSTEM_INSTRUCTION = (
+    "You are an autonomous AI assistant powered by Google Antigravity. "
+    "You have access to a filesystem MCP server pointing to the './shared_data' directory. "
+    "When users upload files, they are placed in './shared_data'. Use your filesystem tools to inspect, "
+    "read, or process files when requested. "
+    "Sensitive actions like modifying files or running commands require user approval via UI."
+)
+
+async def stream_antigravity_agent(user_message: str, model_name: str = None, system_instruction: str = None):
     load_dotenv(override=True)
     api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or os.getenv("API_KEY") or GEMINI_API_KEY
 
@@ -58,17 +66,12 @@ async def stream_antigravity_agent(user_message: str, model_name: str = None):
 
     # Normalize model selection (if Default or empty, set to None)
     target_model = None if not model_name or "Default" in str(model_name) else model_name
+    active_instruction = system_instruction.strip() if system_instruction and system_instruction.strip() else DEFAULT_SYSTEM_INSTRUCTION
 
     def make_agent_config(model_to_use):
         kwargs = {
             "api_key": api_key,
-            "system_instructions": (
-                "You are an autonomous AI assistant powered by Google Antigravity. "
-                "You have access to a filesystem MCP server pointing to the './shared_data' directory. "
-                "When users upload files, they are placed in './shared_data'. Use your filesystem tools to inspect, "
-                "read, or process files when requested. "
-                "Sensitive actions like modifying files or running commands require user approval via UI."
-            ),
+            "system_instructions": active_instruction,
             "mcp_servers": [filesystem_mcp],
             "policies": safety_policies,
         }
@@ -95,10 +98,10 @@ async def stream_antigravity_agent(user_message: str, model_name: str = None):
         else:
             raise e
 
-def generate_agent_stream(prompt: str, model_name: str = None):
+def generate_agent_stream(prompt: str, model_name: str = None, system_instruction: str = None):
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    gen = stream_antigravity_agent(prompt, model_name=model_name)
+    gen = stream_antigravity_agent(prompt, model_name=model_name, system_instruction=system_instruction)
     try:
         while True:
             chunk = loop.run_until_complete(gen.__anext__())

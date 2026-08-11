@@ -1,4 +1,5 @@
 import os
+import time
 import asyncio
 import streamlit as st
 from database import (
@@ -9,7 +10,9 @@ from database import (
     delete_session, 
     rename_session,
     export_session_to_markdown,
-    export_session_to_json
+    export_session_to_json,
+    log_analytics_event,
+    get_analytics_summary
 )
 from auth import render_login
 from agent import generate_agent_stream
@@ -179,6 +182,48 @@ selected_model = st.sidebar.selectbox(
     ["Default (Auto)", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.5-flash"],
     index=0,
     help="Default (Auto): Automatically uses the best default model supported by your Gemini API key."
+)
+
+st.sidebar.markdown("---")
+
+# 🎭 System Persona & Instructions Customizer
+st.sidebar.subheader("🎭 Persona Customizer")
+
+preset_personas = {
+    "🤖 Default Agent": (
+        "You are an autonomous AI assistant powered by Google Antigravity. "
+        "You have access to a filesystem MCP server pointing to the './shared_data' directory. "
+        "Use your tools to inspect and process files when requested."
+    ),
+    "🐍 Senior Python Developer": (
+        "You are an expert Senior Python Developer & Software Architect. "
+        "Provide production-grade, highly efficient, well-documented code with type hints and robust error handling."
+    ),
+    "📊 Senior Data Analyst": (
+        "You are a Senior Data Analyst and Business Intelligence expert. "
+        "Analyze workspace files, synthesize key insights, generate clear metrics, and summarize trends concisely."
+    ),
+    "🛡️ Cybersecurity Auditor": (
+        "You are a Lead Cybersecurity & Infrastructure Security Auditor. "
+        "Inspect codebase and workspace files for security vulnerabilities, secrets leakage, and hardcoded credentials."
+    ),
+    "✍️ Technical Writer": (
+        "You are an Executive Technical Writer and Documentation Specialist. "
+        "Format reports with clean Markdown headers, bullet points, executive summaries, and clear action items."
+    )
+}
+
+selected_persona_name = st.sidebar.selectbox(
+    "Choose Preset Persona",
+    list(preset_personas.keys()),
+    index=0
+)
+
+custom_instructions = st.sidebar.text_area(
+    "Edit System Instructions",
+    value=preset_personas[selected_persona_name],
+    height=110,
+    help="Modify these instructions to change how the agent behaves and responds."
 )
 
 st.sidebar.markdown("---")
@@ -362,6 +407,21 @@ if current_session:
     m2.metric("📁 Workspace Storage", f"{total_files} files", f"{total_kb} KB total")
     m3.metric("💬 Saved Sessions", f"{len(sessions)} total", f"Active: #{current_session.id}")
 
+    # Analytics & System Diagnostics Panel
+    with st.expander("📊 System Analytics & Diagnostics"):
+        analytics = get_analytics_summary()
+        a1, a2, a3, a4 = st.columns(4)
+        a1.metric("⏱️ Avg Latency", f"{analytics['avg_latency']}s")
+        a2.metric("💬 Total Queries", f"{analytics['total_queries']}")
+        a3.metric("🪙 Tokens Processed", f"{analytics['total_tokens']:,}")
+        a4.metric("🛠️ Tool Executions", f"{analytics['total_tool_calls']}")
+
+        if analytics['recent_logs']:
+            st.caption("Recent Query Execution Log:")
+            st.dataframe(analytics['recent_logs'], use_container_width=True)
+        else:
+            st.caption("No diagnostic logs yet. Start chatting with the agent to track live latency & token stats!")
+
     # ==========================================
     # HUMAN-IN-THE-LOOP APPROVAL BANNER
     # ==========================================
@@ -389,6 +449,76 @@ if current_session:
     for msg in current_session.messages:
         with st.chat_message(msg.role):
             st.write(msg.content)
+            if msg.role == "assistant":
+                import html as html_lib
+                escaped_text = html_lib.escape(msg.content.replace("\n", " ").replace("'", "\\'"))
+                tts_html = f"""
+                <div style="margin-top: 6px;">
+                    <button onclick="
+                        const msg = new SpeechSynthesisUtterance('{escaped_text}');
+                        window.speechSynthesis.cancel();
+                        window.speechSynthesis.speak(msg);
+                    " style="background: #282a2c; color: #a8c7fa; border: 1px solid #37393b; border-radius: 16px; padding: 4px 12px; font-size: 0.8rem; cursor: pointer;">
+                        🔊 Read Aloud
+                    </button>
+                    <button onclick="window.speechSynthesis.cancel();" style="background: #282a2c; color: #f28b82; border: 1px solid #37393b; border-radius: 16px; padding: 4px 12px; font-size: 0.8rem; cursor: pointer; margin-left: 6px;">
+                        ⏹️ Stop Audio
+                    </button>
+                </div>
+                """
+                st.components.v1.html(tts_html, height=40)
+
+    # Voice Dictation Mic Tool
+    with st.expander("🎙️ Voice Dictation Mic Input"):
+        dictation_html = """
+        <div style="background: #1e1f20; border: 1px solid #37393b; border-radius: 14px; padding: 12px; font-family: sans-serif;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <button id="mic_btn" onclick="startDictation()" style="background: linear-gradient(135deg, #1a73e8, #0b57d0); color: white; border: none; border-radius: 20px; padding: 8px 18px; font-weight: 500; cursor: pointer;">
+                    🎙️ Start Dictation
+                </button>
+                <span id="mic_status" style="color: #c4c7c5; font-size: 0.9rem;">Click button and speak...</span>
+            </div>
+            <div id="dictation_output" style="margin-top: 10px; color: #a8c7fa; font-size: 0.95rem; font-style: italic; min-height: 22px;"></div>
+        </div>
+
+        <script>
+        function startDictation() {
+            const status = document.getElementById('mic_status');
+            const output = document.getElementById('dictation_output');
+            
+            if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+                status.innerText = '⚠️ Speech recognition not supported in this browser.';
+                return;
+            }
+            
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            const recognition = new SpeechRecognition();
+            recognition.continuous = false;
+            recognition.interimResults = true;
+            recognition.lang = 'en-US';
+            
+            status.innerText = '🎙️ Listening... Speak now!';
+            recognition.start();
+            
+            recognition.onresult = function(event) {
+                let transcript = '';
+                for (let i = event.resultIndex; i < event.results.length; ++i) {
+                    transcript += event.results[i][0].transcript;
+                }
+                output.innerText = transcript;
+            };
+            
+            recognition.onerror = function(event) {
+                status.innerText = '⚠️ Dictation error: ' + event.error;
+            };
+            
+            recognition.onend = function() {
+                status.innerText = '✅ Speech captured!';
+            };
+        }
+        </script>
+        """
+        st.components.v1.html(dictation_html, height=110)
 
     # Quick Action Prompt Chips
     st.caption("⚡ **Quick Actions:**")
@@ -419,12 +549,14 @@ if current_session:
             current_session.title = prompt[:30]
             db.commit()
 
+        start_time = time.time()
+
         with st.chat_message("assistant"):
             response_chunks = []
 
             def stream_and_capture():
                 try:
-                    for chunk in generate_agent_stream(prompt, model_name=selected_model):
+                    for chunk in generate_agent_stream(prompt, model_name=selected_model, system_instruction=custom_instructions):
                         response_chunks.append(chunk)
                         yield chunk
                 except Exception as e:
@@ -436,9 +568,19 @@ if current_session:
 
             st.write_stream(stream_and_capture())
 
+        latency = time.time() - start_time
         full_response = "".join(response_chunks)
         agent_record = ChatMessage(session_id=current_session.id, role="assistant", content=full_response)
         db.add(agent_record)
         db.commit()
+
+        # Record Analytics Diagnostics Event
+        log_analytics_event(
+            session_id=current_session.id,
+            prompt=prompt,
+            model_name=selected_model,
+            latency=latency,
+            response_text=full_response
+        )
 
 db.close()

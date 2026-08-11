@@ -1,7 +1,7 @@
 import datetime
 import hashlib
 import secrets
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, create_engine
+from sqlalchemy import Column, Integer, Float, String, Text, DateTime, ForeignKey, create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 from config import DATABASE_URL, ADMIN_USERNAME, ADMIN_PASSWORD
 
@@ -53,6 +53,18 @@ class ChatMessage(Base):
     content = Column(Text, nullable=False)
     timestamp = Column(DateTime, default=datetime.datetime.utcnow)
     session = relationship("ChatSession", back_populates="messages")
+
+class AnalyticsLog(Base):
+    __tablename__ = "analytics_logs"
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(Integer, nullable=True)
+    prompt = Column(Text, nullable=True)
+    model_name = Column(String, default="Default (Auto)")
+    latency_seconds = Column(Float, default=0.0)
+    prompt_tokens = Column(Integer, default=0)
+    response_tokens = Column(Integer, default=0)
+    tool_calls_count = Column(Integer, default=0)
+    timestamp = Column(DateTime, default=datetime.datetime.utcnow)
 
 def init_db():
     Base.metadata.create_all(bind=engine)
@@ -173,3 +185,50 @@ def export_session_to_json(session_id: int) -> str:
     }
     db.close()
     return json.dumps(data, indent=2)
+
+def log_analytics_event(session_id: int, prompt: str, model_name: str, latency: float, response_text: str, tool_calls_count: int = 0):
+    """Records performance, latency, and token analytics for an agent execution."""
+    db = SessionLocal()
+    p_tokens = int(len(prompt.split()) * 1.3)
+    r_tokens = int(len(response_text.split()) * 1.3)
+    log_entry = AnalyticsLog(
+        session_id=session_id,
+        prompt=prompt[:80],
+        model_name=model_name or "Default (Auto)",
+        latency_seconds=round(latency, 2),
+        prompt_tokens=p_tokens,
+        response_tokens=r_tokens,
+        tool_calls_count=tool_calls_count
+    )
+    db.add(log_entry)
+    db.commit()
+    db.close()
+
+def get_analytics_summary():
+    """Retrieves aggregated performance analytics metrics."""
+    db = SessionLocal()
+    logs = db.query(AnalyticsLog).order_by(AnalyticsLog.timestamp.desc()).all()
+    total_queries = len(logs)
+    avg_latency = round(sum(l.latency_seconds for l in logs) / total_queries, 2) if total_queries else 0.0
+    total_tokens = sum(l.prompt_tokens + l.response_tokens for l in logs)
+    total_tool_calls = sum(l.tool_calls_count for l in logs)
+    recent_logs = [
+        {
+            "id": l.id,
+            "prompt": l.prompt,
+            "model": l.model_name,
+            "latency": f"{l.latency_seconds}s",
+            "tokens": l.prompt_tokens + l.response_tokens,
+            "tools": l.tool_calls_count,
+            "timestamp": l.timestamp.strftime('%Y-%m-%d %H:%M:%S')
+        }
+        for l in logs[:10]
+    ]
+    db.close()
+    return {
+        "total_queries": total_queries,
+        "avg_latency": avg_latency,
+        "total_tokens": total_tokens,
+        "total_tool_calls": total_tool_calls,
+        "recent_logs": recent_logs
+    }

@@ -146,3 +146,30 @@ def export_session_to_markdown(session_id: int) -> str:
 
     db.close()
     return md_content
+
+def export_session_to_json(session_id: int) -> str:
+    """Converts a chat session's messages into a structured JSON string."""
+    import json
+    db = SessionLocal()
+    session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
+    if not session:
+        db.close()
+        return json.dumps({})
+
+    data = {
+        "session_id": session.id,
+        "title": session.title,
+        "created_at": session.created_at.strftime('%Y-%m-%d %H:%M:%S UTC'),
+        "exported_at": datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC'),
+        "messages": [
+            {
+                "id": msg.id,
+                "role": msg.role,
+                "content": msg.content,
+                "timestamp": msg.timestamp.strftime('%Y-%m-%d %H:%M:%S UTC')
+            }
+            for msg in session.messages
+        ]
+    }
+    db.close()
+    return json.dumps(data, indent=2)

@@ -1,4 +1,5 @@
 import os
+import asyncio
 import streamlit as st
 from database import (
     init_db, 
@@ -7,13 +8,145 @@ from database import (
     ChatMessage, 
     delete_session, 
     rename_session,
-    export_session_to_markdown
+    export_session_to_markdown,
+    export_session_to_json
 )
 from auth import render_login
 from agent import generate_agent_stream
-from scheduler import start_scheduler, scheduler, run_daily_summary_job
+from scheduler import start_scheduler, stop_scheduler, scheduler, run_daily_summary_job
 
-st.set_page_config(page_title="Antigravity Console", page_icon="⚡", layout="wide")
+st.set_page_config(
+    page_title="Gemini Antigravity Console", 
+    page_icon="✨", 
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# ==========================================
+# GOOGLE GEMINI DARK THEME AESTHETIC SYSTEM
+# ==========================================
+st.markdown("""
+<style>
+    @import url('https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&display=swap');
+
+    /* Global Body & Deep Gemini Dark Theme */
+    html, body, .stApp {
+        background-color: #131314 !important;
+        font-family: 'Google Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+        color: #e3e3e3 !important;
+    }
+
+    /* Google Gemini Dark Sidebar (#1e1f20) */
+    [data-testid="stSidebar"] {
+        background-color: #1e1f20 !important;
+        border-right: 1px solid #2d2f31 !important;
+    }
+
+    /* Metric Cards - Dark Glassmorphism */
+    div[data-testid="metric-container"] {
+        background-color: #1e1f20 !important;
+        border: 1px solid #2d2f31 !important;
+        border-radius: 16px !important;
+        padding: 14px 18px !important;
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4) !important;
+    }
+
+    div[data-testid="stMetricValue"] {
+        font-size: 1.5rem !important;
+        font-weight: 700 !important;
+        color: #a8c7fa !important;
+    }
+
+    div[data-testid="stMetricLabel"] {
+        font-size: 0.85rem !important;
+        color: #c4c7c5 !important;
+        font-weight: 500 !important;
+    }
+
+    /* Primary Gemini Glowing Pill Buttons */
+    .stButton > button {
+        background: linear-gradient(135deg, #1a73e8 0%, #0b57d0 100%) !important;
+        color: #ffffff !important;
+        border: none !important;
+        border-radius: 24px !important;
+        font-weight: 500 !important;
+        padding: 0.5rem 1.25rem !important;
+        transition: all 0.2s ease !important;
+        box-shadow: 0 2px 8px rgba(26, 115, 232, 0.3) !important;
+    }
+
+    .stButton > button:hover {
+        box-shadow: 0 4px 16px rgba(168, 199, 250, 0.4) !important;
+        transform: translateY(-1px) !important;
+    }
+
+    /* Secondary Sidebar Conversation Pills */
+    button[kind="secondary"] {
+        background: #282a2c !important;
+        color: #e3e3e3 !important;
+        border: 1px solid #37393b !important;
+        border-radius: 20px !important;
+        box-shadow: none !important;
+    }
+
+    button[kind="secondary"]:hover {
+        background: #37393b !important;
+        color: #a8c7fa !important;
+    }
+
+    /* Inputs & Search Input Fields */
+    .stTextInput > div > div > input {
+        border-radius: 12px !important;
+        border: 1px solid #444746 !important;
+        background-color: #131314 !important;
+        color: #e3e3e3 !important;
+    }
+
+    .stTextInput > div > div > input:focus {
+        border-color: #a8c7fa !important;
+        box-shadow: 0 0 0 2px rgba(168, 199, 250, 0.2) !important;
+    }
+
+    /* Gemini Floating Chat Capsule Input Bar */
+    .stChatInput > div {
+        border-radius: 28px !important;
+        border: 1px solid #444746 !important;
+        background-color: #1e1f20 !important;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5) !important;
+        padding: 6px 12px !important;
+    }
+
+    .stChatInput > div:focus-within {
+        border-color: #a8c7fa !important;
+        box-shadow: 0 4px 24px rgba(168, 199, 250, 0.25) !important;
+    }
+
+    /* Gemini Chat Messages Container Cards */
+    div[data-testid="stChatMessage"] {
+        background-color: #1e1f20 !important;
+        border: 1px solid #2d2f31 !important;
+        border-radius: 18px !important;
+        padding: 14px 18px !important;
+        margin-bottom: 12px !important;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25) !important;
+    }
+
+    /* Gemini Header Badge */
+    .gemini-dark-badge {
+        background: linear-gradient(135deg, rgba(168, 199, 250, 0.15) 0%, rgba(26, 115, 232, 0.15) 100%);
+        border: 1px solid rgba(168, 199, 250, 0.3);
+        color: #a8c7fa;
+        padding: 6px 16px;
+        border-radius: 20px;
+        font-size: 0.85rem;
+        font-weight: 600;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        margin-bottom: 14px;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 # Ensure shared directory exists
 SHARED_DIR = "./shared_data"
@@ -22,67 +155,118 @@ os.makedirs(SHARED_DIR, exist_ok=True)
 init_db()
 render_login()
 
-# Initialize APScheduler background worker
-start_scheduler()
+# ==========================================
+# SIDEBAR CONFIGURATION & TOOLS
+# ==========================================
 
-# Sidebar Setup
+st.sidebar.markdown("""
+<div style="text-align: center; padding: 10px 0;">
+    <h2 style="color: #a8c7fa; margin: 0; font-size: 1.5rem;">✨ AI Agent</h2>
+    <span style="color: #c4c7c5; font-size: 0.85rem; font-weight: 500;">Welcome, <b>Siddharth</b> 👋</span>
+</div>
+""", unsafe_allow_html=True)
+
 st.sidebar.markdown("---")
 
 api_key_env = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or os.getenv("API_KEY")
 if not api_key_env:
     st.sidebar.warning("⚠️ `GEMINI_API_KEY` missing in `.env` file.")
 
-# ==========================================
-# FILE UPLOADER SECTION
-# ==========================================
-st.sidebar.subheader("📁 Upload Files for Agent")
+# 🤖 Model Selector
+st.sidebar.subheader("🤖 Model Engine")
+selected_model = st.sidebar.selectbox(
+    "Select Model Engine",
+    ["gemini-2.5-flash", "gemini-2.5-pro"],
+    index=0,
+    help="Flash: Fast responses. Pro: Deep analytical reasoning."
+)
+
+st.sidebar.markdown("---")
+
+# 📁 Workspace File Manager
+st.sidebar.subheader("📁 Workspace Files")
+
 uploaded_files = st.sidebar.file_uploader(
-    "Choose files (PDF, TXT, Python, CSV, etc.)", 
+    "Upload Documents (PDF, TXT, CSV, PY)", 
     accept_multiple_files=True
 )
 
 if uploaded_files:
     for uploaded_file in uploaded_files:
         file_path = os.path.join(SHARED_DIR, uploaded_file.name)
-        # Write file to ./shared_data so MCP server can access it
         with open(file_path, "wb") as f:
             f.write(uploaded_file.getbuffer())
-    st.sidebar.success(f"Saved {len(uploaded_files)} file(s) to agent workspace!")
+    st.sidebar.success(f"Uploaded {len(uploaded_files)} file(s)!")
+    st.rerun()
+
+existing_files = os.listdir(SHARED_DIR)
+if existing_files:
+    with st.sidebar.expander(f"📂 View Files ({len(existing_files)})"):
+        for fname in existing_files:
+            fpath = os.path.join(SHARED_DIR, fname)
+            fsize_kb = round(os.path.getsize(fpath) / 1024, 1)
+            
+            c_name, c_del = st.columns([0.75, 0.25])
+            c_name.caption(f"📄 **{fname}** ({fsize_kb} KB)")
+            
+            if c_del.button("🗑️", key=f"delfile_{fname}"):
+                os.remove(fpath)
+                st.rerun()
+            
+            if fname.endswith(('.txt', '.csv', '.json', '.py', '.md')):
+                try:
+                    with open(fpath, 'r', encoding='utf-8', errors='ignore') as pf:
+                        snippet = pf.read(250)
+                    st.code(snippet[:180] + ("..." if len(snippet) > 180 else ""), language="text")
+                except Exception:
+                    pass
+else:
+    st.sidebar.caption("Workspace folder empty (`./shared_data`)")
 
 st.sidebar.markdown("---")
 
-# ==========================================
-# AUTONOMOUS SCHEDULER SECTION
-# ==========================================
-st.sidebar.subheader("⏰ Autonomous Scheduler")
-if scheduler.running:
-    st.sidebar.caption("Status: 🟢 **Running** (APScheduler)")
-else:
-    st.sidebar.caption("Status: 🔴 **Stopped**")
+# ⏰ Autonomous Background Scheduler Control
+st.sidebar.subheader("⏰ Background Scheduler")
 
-if st.sidebar.button("⚡ Run Daily Briefing Now", use_container_width=True):
-    with st.spinner("Agent is inspecting local files & compiling briefing..."):
+enable_scheduler = st.sidebar.toggle(
+    "Enable Background Cron Tasks", 
+    value=st.session_state.get("bg_scheduler_enabled", False),
+    help="When enabled, the background worker automatically runs daily workspace briefings."
+)
+
+if enable_scheduler:
+    if not scheduler.running:
+        start_scheduler()
+    st.session_state.bg_scheduler_enabled = True
+    st.sidebar.caption("Status: 🟢 **Active (Cron: Daily 8:00 AM)**")
+else:
+    if scheduler.running:
+        stop_scheduler()
+    st.session_state.bg_scheduler_enabled = False
+    st.sidebar.caption("Status: 🔴 **Disabled (On-Demand Only)**")
+
+if st.sidebar.button("⚡ Run Briefing Now", use_container_width=True):
+    with st.spinner("Agent is inspecting files & compiling briefing..."):
         run_daily_summary_job()
-    st.sidebar.success("Briefing updated! Check the '🤖 Daily Automated Briefings' session.")
+    st.sidebar.success("Briefing updated!")
     st.rerun()
 
 st.sidebar.markdown("---")
+
+# 💬 Search & Conversation Manager
 st.sidebar.subheader("💬 Conversations")
 
 db = SessionLocal()
+sessions = db.query(ChatSession).order_by(ChatSession.created_at.desc()).all()
 
-current_user = st.session_state.get("user")
-user_id = current_user.get("id") if current_user else None
+search_query = st.sidebar.text_input("🔍 Search History", placeholder="Filter by title...")
+filtered_sessions = [
+    s for s in sessions 
+    if not search_query or search_query.lower() in s.title.lower()
+]
 
-if current_user and current_user.get("role") != "admin":
-    sessions = db.query(ChatSession).filter(
-        (ChatSession.user_id == user_id) | (ChatSession.user_id == None)
-    ).order_by(ChatSession.created_at.desc()).all()
-else:
-    sessions = db.query(ChatSession).order_by(ChatSession.created_at.desc()).all()
-
-if st.sidebar.button("+ New Conversation", use_container_width=True):
-    new_session = ChatSession(title="New Chat", user_id=user_id)
+if st.sidebar.button("+ New Chat", use_container_width=True, type="primary"):
+    new_session = ChatSession(title="New Chat")
     db.add(new_session)
     db.commit()
     st.session_state.active_session_id = new_session.id
@@ -92,17 +276,17 @@ if "active_session_id" not in st.session_state:
     if sessions:
         st.session_state.active_session_id = sessions[0].id
     else:
-        new_session = ChatSession(title="New Chat", user_id=user_id)
+        new_session = ChatSession(title="New Chat")
         db.add(new_session)
         db.commit()
         st.session_state.active_session_id = new_session.id
 
-# Render conversation items with popovers
-for s in sessions:
+# Render Session Items
+for s in filtered_sessions:
     col_btn, col_opts = st.sidebar.columns([0.8, 0.2])
     
     is_active = (s.id == st.session_state.active_session_id)
-    btn_label = f"📌 {s.title[:16]}..." if is_active and len(s.title) > 16 else (s.title[:18] + "..." if len(s.title) > 18 else s.title)
+    btn_label = f"💬 {s.title[:16]}..." if is_active and len(s.title) > 16 else (s.title[:18] + "..." if len(s.title) > 18 else s.title)
     
     if col_btn.button(btn_label, key=f"session_{s.id}", use_container_width=True, type="primary" if is_active else "secondary"):
         st.session_state.active_session_id = s.id
@@ -127,27 +311,56 @@ for s in sessions:
                     del st.session_state["active_session_id"]
             st.rerun()
 
-# Initialize approval session state
 if "pending_approval" not in st.session_state:
     st.session_state.pending_approval = None
 
-# Main Chat Dashboard View
+# Show welcome toast on session login
+if "welcome_shown" not in st.session_state:
+    st.toast("👋 Welcome back, Siddharth!", icon="✨")
+    st.session_state.welcome_shown = True
+
+# ==========================================
+# MAIN DASHBOARD VIEW & METRICS BAR
+# ==========================================
+
 current_session = db.query(ChatSession).filter(ChatSession.id == st.session_state.get("active_session_id")).first()
 
 if current_session:
-    col_title, col_export = st.columns([0.75, 0.25])
-    col_title.title(f"⚡ {current_session.title}")
-    
+    col_welcome, col_export = st.columns([0.65, 0.35])
+    with col_welcome:
+        st.markdown('<div class="gemini-dark-badge">✨ Google Antigravity &bull; Gemini Dark Console</div>', unsafe_allow_html=True)
+        st.markdown('<h2 style="color: #a8c7fa; margin-top: -6px; margin-bottom: 2px; font-weight: 700; font-size: 1.8rem;">👋 Welcome back, Siddharth</h2>', unsafe_allow_html=True)
+        st.title(f"{current_session.title}")
+
     markdown_data = export_session_to_markdown(current_session.id)
-    file_name = f"{current_session.title.lower().replace(' ', '_')}_history.md"
+    json_data = export_session_to_json(current_session.id)
+    slug_title = current_session.title.lower().replace(' ', '_').replace('/', '_')
+
+    with col_export.popover("📥 Export Session Log", use_container_width=True):
+        st.caption("Download Conversation Record")
+        st.download_button(
+            label="📝 Download as Markdown (.md)",
+            data=markdown_data,
+            file_name=f"{slug_title}.md",
+            mime="text/markdown",
+            use_container_width=True
+        )
+        st.download_button(
+            label="📦 Download as JSON (.json)",
+            data=json_data,
+            file_name=f"{slug_title}.json",
+            mime="application/json",
+            use_container_width=True
+        )
+
+    # Top Metric Cards (Gemini Dark Style)
+    m1, m2, m3 = st.columns(3)
+    total_files = len(os.listdir(SHARED_DIR))
+    total_kb = sum(os.path.getsize(os.path.join(SHARED_DIR, f)) for f in os.listdir(SHARED_DIR)) // 1024 if total_files else 0
     
-    col_export.download_button(
-        label="📥 Export Markdown",
-        data=markdown_data,
-        file_name=file_name,
-        mime="text/markdown",
-        use_container_width=True
-    )
+    m1.metric("🤖 Active Engine", selected_model, "Connected 🟢")
+    m2.metric("📁 Workspace Storage", f"{total_files} files", f"{total_kb} KB total")
+    m3.metric("💬 Saved Sessions", f"{len(sessions)} total", f"Active: #{current_session.id}")
 
     # ==========================================
     # HUMAN-IN-THE-LOOP APPROVAL BANNER
@@ -172,12 +385,13 @@ if current_session:
 
     st.markdown("---")
 
+    # Display Chat Messages
     for msg in current_session.messages:
         with st.chat_message(msg.role):
             st.write(msg.content)
 
-    # Handle Chat Input
-    if prompt := st.chat_input("Ask your agent or ask it to read an uploaded file..."):
+    # Chat Input Box (Floating Gemini Capsule)
+    if prompt := st.chat_input(f"Ask Gemini ({selected_model}) or request file inspection..."):
         with st.chat_message("user"):
             st.write(prompt)
 
@@ -193,13 +407,13 @@ if current_session:
 
             def stream_and_capture():
                 try:
-                    for chunk in generate_agent_stream(prompt):
+                    for chunk in generate_agent_stream(prompt, model_name=selected_model):
                         response_chunks.append(chunk)
                         yield chunk
                 except Exception as e:
                     err_msg = str(e)
                     if "API key" in err_msg or "AntigravityValidationError" in type(e).__name__:
-                        st.error("🔑 **API Key Error**: Please add `GEMINI_API_KEY=your_api_key` in your `.env` file and save it.")
+                        st.error("🔑 **API Key Error**: Please set `GEMINI_API_KEY=your_key` in your `.env` file.")
                     else:
                         st.error(f"⚠️ Error: {e}")
 

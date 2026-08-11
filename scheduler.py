@@ -72,3 +72,9 @@ def start_scheduler():
         )
         scheduler.start()
         print("[Scheduler] Background cron worker active.")
+
+def stop_scheduler():
+    """Stops the background scheduler if running."""
+    if scheduler.running:
+        scheduler.shutdown(wait=False)
+        print("[Scheduler] Background cron worker stopped.")

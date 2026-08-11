@@ -32,7 +32,7 @@ async def handle_ask_user_policy(action_context):
     st.session_state.pending_approval = None
     return approved
 
-async def stream_antigravity_agent(user_message: str):
+async def stream_antigravity_agent(user_message: str, model_name: str = "gemini-2.5-flash"):
     load_dotenv(override=True)
     api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or os.getenv("API_KEY") or GEMINI_API_KEY
 
@@ -58,6 +58,7 @@ async def stream_antigravity_agent(user_message: str):
 
     config = LocalAgentConfig(
         api_key=api_key,
+        model=model_name,
         system_instructions=(
             "You are an autonomous AI assistant powered by Google Antigravity. "
             "You have access to a filesystem MCP server pointing to the './shared_data' directory. "
@@ -74,10 +75,10 @@ async def stream_antigravity_agent(user_message: str):
         async for chunk in response:
             yield chunk
 
-def generate_agent_stream(prompt: str):
+def generate_agent_stream(prompt: str, model_name: str = "gemini-2.5-flash"):
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    gen = stream_antigravity_agent(prompt)
+    gen = stream_antigravity_agent(prompt, model_name=model_name)
     try:
         while True:
             chunk = loop.run_until_complete(gen.__anext__())

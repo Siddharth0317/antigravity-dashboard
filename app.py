@@ -176,9 +176,9 @@ if not api_key_env:
 st.sidebar.subheader("🤖 Model Engine")
 selected_model = st.sidebar.selectbox(
     "Select Model Engine",
-    ["gemini-2.5-flash", "gemini-2.5-pro"],
+    ["Default (Auto)", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.5-flash"],
     index=0,
-    help="Flash: Fast responses. Pro: Deep analytical reasoning."
+    help="Default (Auto): Automatically uses the best default model supported by your Gemini API key."
 )
 
 st.sidebar.markdown("---")
@@ -390,8 +390,25 @@ if current_session:
         with st.chat_message(msg.role):
             st.write(msg.content)
 
+    # Quick Action Prompt Chips
+    st.caption("⚡ **Quick Actions:**")
+    q1, q2, q3, q4 = st.columns(4)
+    
+    preset_prompt = None
+    if q1.button("📋 Workspace Audit", use_container_width=True, key="chip_audit"):
+        preset_prompt = "Inspect all files in `./shared_data` and provide a detailed workspace summary report."
+    if q2.button("🔍 Code Quality Review", use_container_width=True, key="chip_code"):
+        preset_prompt = "Perform a code quality audit on Python and script files in `./shared_data`."
+    if q3.button("📝 Executive Briefing", use_container_width=True, key="chip_brief"):
+        preset_prompt = "Compile a clean executive briefing covering workspace health, file contents, and recommended actions."
+    if q4.button("⚡ Refactor & Optimize", use_container_width=True, key="chip_opt"):
+        preset_prompt = "Analyze files in `./shared_data` and suggest performance optimizations or code refactoring."
+
     # Chat Input Box (Floating Gemini Capsule)
-    if prompt := st.chat_input(f"Ask Gemini ({selected_model}) or request file inspection..."):
+    chat_prompt = st.chat_input(f"Ask AI Agent ({selected_model}) or request file inspection...")
+    prompt = preset_prompt or chat_prompt
+
+    if prompt:
         with st.chat_message("user"):
             st.write(prompt)
 

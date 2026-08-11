@@ -32,7 +32,7 @@ async def handle_ask_user_policy(action_context):
     st.session_state.pending_approval = None
     return approved
 
-async def stream_antigravity_agent(user_message: str, model_name: str = "gemini-2.5-flash"):
+async def stream_antigravity_agent(user_message: str, model_name: str = None):
     load_dotenv(override=True)
     api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or os.getenv("API_KEY") or GEMINI_API_KEY
 
@@ -56,26 +56,46 @@ async def stream_antigravity_agent(user_message: str, model_name: str = "gemini-
         args=["-y", "@modelcontextprotocol/server-filesystem", "./shared_data"]
     )
 
-    config = LocalAgentConfig(
-        api_key=api_key,
-        model=model_name,
-        system_instructions=(
-            "You are an autonomous AI assistant powered by Google Antigravity. "
-            "You have access to a filesystem MCP server pointing to the './shared_data' directory. "
-            "When users upload files, they are placed in './shared_data'. Use your filesystem tools to inspect, "
-            "read, or process files when requested. "
-            "Sensitive actions like modifying files or running commands require user approval via UI."
-        ),
-        mcp_servers=[filesystem_mcp],
-        policies=safety_policies,
-    )
+    # Normalize model selection (if Default or empty, set to None)
+    target_model = None if not model_name or "Default" in str(model_name) else model_name
 
-    async with Agent(config) as agent:
-        response = await agent.chat(user_message)
-        async for chunk in response:
-            yield chunk
+    def make_agent_config(model_to_use):
+        kwargs = {
+            "api_key": api_key,
+            "system_instructions": (
+                "You are an autonomous AI assistant powered by Google Antigravity. "
+                "You have access to a filesystem MCP server pointing to the './shared_data' directory. "
+                "When users upload files, they are placed in './shared_data'. Use your filesystem tools to inspect, "
+                "read, or process files when requested. "
+                "Sensitive actions like modifying files or running commands require user approval via UI."
+            ),
+            "mcp_servers": [filesystem_mcp],
+            "policies": safety_policies,
+        }
+        if model_to_use:
+            kwargs["model"] = model_to_use
+        return LocalAgentConfig(**kwargs)
 
-def generate_agent_stream(prompt: str, model_name: str = "gemini-2.5-flash"):
+    config = make_agent_config(target_model)
+
+    try:
+        async with Agent(config) as agent:
+            response = await agent.chat(user_message)
+            async for chunk in response:
+                yield chunk
+    except Exception as e:
+        err_str = str(e).lower()
+        if "model" in err_str or "not found" in err_str or "not available" in err_str or "404" in err_str:
+            # Automatic fallback to default SDK model configuration
+            fallback_config = make_agent_config(None)
+            async with Agent(fallback_config) as fallback_agent:
+                fallback_response = await fallback_agent.chat(user_message)
+                async for chunk in fallback_response:
+                    yield chunk
+        else:
+            raise e
+
+def generate_agent_stream(prompt: str, model_name: str = None):
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     gen = stream_antigravity_agent(prompt, model_name=model_name)

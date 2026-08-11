@@ -26,12 +26,11 @@ def render_login():
             st.sidebar.error(f"⛔ Console locked out. Try again in {remaining_secs}s.")
             st.stop()
 
-        if not ADMIN_PASSWORD:
-            st.sidebar.warning("⚠️ `ADMIN_PASSWORD` missing in `.env` file!")
+        with st.sidebar.form("login_form", clear_on_submit=False):
+            password = st.text_input("Enter Passcode", type="password", key="master_password")
+            submitted = st.form_submit_button("Unlock Console", use_container_width=True, type="primary")
 
-        password = st.sidebar.text_input("Enter Passcode", type="password", key="master_password")
-
-        if st.sidebar.button("Unlock Console", use_container_width=True, type="primary"):
+        if submitted:
             if not ADMIN_PASSWORD:
                 st.sidebar.error("Please set `ADMIN_PASSWORD=your_password` in `.env` file.")
             elif password == ADMIN_PASSWORD:

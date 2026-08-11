@@ -11,6 +11,7 @@ from database import (
 )
 from auth import render_login
 from agent import generate_agent_stream
+from scheduler import start_scheduler, scheduler, run_daily_summary_job
 
 st.set_page_config(page_title="Antigravity Console", page_icon="⚡", layout="wide")
 
@@ -21,8 +22,15 @@ os.makedirs(SHARED_DIR, exist_ok=True)
 init_db()
 render_login()
 
+# Initialize APScheduler background worker
+start_scheduler()
+
 # Sidebar Setup
 st.sidebar.markdown("---")
+
+api_key_env = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or os.getenv("API_KEY")
+if not api_key_env:
+    st.sidebar.warning("⚠️ `GEMINI_API_KEY` missing in `.env` file.")
 
 # ==========================================
 # FILE UPLOADER SECTION
@@ -42,13 +50,39 @@ if uploaded_files:
     st.sidebar.success(f"Saved {len(uploaded_files)} file(s) to agent workspace!")
 
 st.sidebar.markdown("---")
+
+# ==========================================
+# AUTONOMOUS SCHEDULER SECTION
+# ==========================================
+st.sidebar.subheader("⏰ Autonomous Scheduler")
+if scheduler.running:
+    st.sidebar.caption("Status: 🟢 **Running** (APScheduler)")
+else:
+    st.sidebar.caption("Status: 🔴 **Stopped**")
+
+if st.sidebar.button("⚡ Run Daily Briefing Now", use_container_width=True):
+    with st.spinner("Agent is inspecting local files & compiling briefing..."):
+        run_daily_summary_job()
+    st.sidebar.success("Briefing updated! Check the '🤖 Daily Automated Briefings' session.")
+    st.rerun()
+
+st.sidebar.markdown("---")
 st.sidebar.subheader("💬 Conversations")
 
 db = SessionLocal()
-sessions = db.query(ChatSession).order_by(ChatSession.created_at.desc()).all()
+
+current_user = st.session_state.get("user")
+user_id = current_user.get("id") if current_user else None
+
+if current_user and current_user.get("role") != "admin":
+    sessions = db.query(ChatSession).filter(
+        (ChatSession.user_id == user_id) | (ChatSession.user_id == None)
+    ).order_by(ChatSession.created_at.desc()).all()
+else:
+    sessions = db.query(ChatSession).order_by(ChatSession.created_at.desc()).all()
 
 if st.sidebar.button("+ New Conversation", use_container_width=True):
-    new_session = ChatSession(title="New Chat")
+    new_session = ChatSession(title="New Chat", user_id=user_id)
     db.add(new_session)
     db.commit()
     st.session_state.active_session_id = new_session.id
@@ -58,7 +92,7 @@ if "active_session_id" not in st.session_state:
     if sessions:
         st.session_state.active_session_id = sessions[0].id
     else:
-        new_session = ChatSession(title="New Chat")
+        new_session = ChatSession(title="New Chat", user_id=user_id)
         db.add(new_session)
         db.commit()
         st.session_state.active_session_id = new_session.id
@@ -93,8 +127,12 @@ for s in sessions:
                     del st.session_state["active_session_id"]
             st.rerun()
 
+# Initialize approval session state
+if "pending_approval" not in st.session_state:
+    st.session_state.pending_approval = None
+
 # Main Chat Dashboard View
-current_session = db.query(ChatSession).filter(ChatSession.id == st.session_state.active_session_id).first()
+current_session = db.query(ChatSession).filter(ChatSession.id == st.session_state.get("active_session_id")).first()
 
 if current_session:
     col_title, col_export = st.columns([0.75, 0.25])
@@ -111,37 +149,65 @@ if current_session:
         use_container_width=True
     )
 
+    # ==========================================
+    # HUMAN-IN-THE-LOOP APPROVAL BANNER
+    # ==========================================
+    if st.session_state.get("pending_approval") and st.session_state.pending_approval.get("status") == "pending":
+        approval_data = st.session_state.pending_approval
+        
+        st.warning(f"⚠️ **PERMISSION REQUIRED**: The agent is requesting to execute `{approval_data['tool_name']}`")
+        
+        with st.expander("🔍 View Action Details", expanded=True):
+            st.code(approval_data["details"], language="text")
+
+        col_approve, col_reject, _ = st.columns([0.2, 0.2, 0.6])
+        
+        if col_approve.button("✅ Approve Action", type="primary", use_container_width=True, key="btn_approve_banner"):
+            st.session_state.pending_approval["status"] = "approved"
+            st.rerun()
+
+        if col_reject.button("❌ Reject Action", use_container_width=True, key="btn_reject_banner"):
+            st.session_state.pending_approval["status"] = "rejected"
+            st.rerun()
+
     st.markdown("---")
 
     for msg in current_session.messages:
         with st.chat_message(msg.role):
             st.write(msg.content)
 
-# Handle Chat Input
-if prompt := st.chat_input("Ask your agent or ask it to read an uploaded file..."):
-    with st.chat_message("user"):
-        st.write(prompt)
+    # Handle Chat Input
+    if prompt := st.chat_input("Ask your agent or ask it to read an uploaded file..."):
+        with st.chat_message("user"):
+            st.write(prompt)
 
-    user_record = ChatMessage(session_id=current_session.id, role="user", content=prompt)
-    db.add(user_record)
+        user_record = ChatMessage(session_id=current_session.id, role="user", content=prompt)
+        db.add(user_record)
 
-    if len(current_session.messages) == 0 or current_session.title == "New Chat":
-        current_session.title = prompt[:30]
+        if len(current_session.messages) == 0 or current_session.title == "New Chat":
+            current_session.title = prompt[:30]
+            db.commit()
+
+        with st.chat_message("assistant"):
+            response_chunks = []
+
+            def stream_and_capture():
+                try:
+                    for chunk in generate_agent_stream(prompt):
+                        response_chunks.append(chunk)
+                        yield chunk
+                except Exception as e:
+                    err_msg = str(e)
+                    if "API key" in err_msg or "AntigravityValidationError" in type(e).__name__:
+                        st.error("🔑 **API Key Error**: Please add `GEMINI_API_KEY=your_api_key` in your `.env` file and save it.")
+                    else:
+                        st.error(f"⚠️ Error: {e}")
+
+            st.write_stream(stream_and_capture())
+
+        full_response = "".join(response_chunks)
+        agent_record = ChatMessage(session_id=current_session.id, role="assistant", content=full_response)
+        db.add(agent_record)
         db.commit()
-
-    with st.chat_message("assistant"):
-        full_response = ""
-
-        def stream_and_capture():
-            nonlocal full_response
-            for chunk in generate_agent_stream(prompt):
-                full_response += chunk
-                yield chunk
-
-        st.write_stream(stream_and_capture())
-
-    agent_record = ChatMessage(session_id=current_session.id, role="assistant", content=full_response)
-    db.add(agent_record)
-    db.commit()
 
 db.close()

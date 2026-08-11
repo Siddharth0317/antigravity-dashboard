@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  antigravity-dashboard:
+    build: .
+    container_name: antigravity_dashboard
+    ports:
+      - "8501:8501"
+    env_file:
+      - .env
+    environment:
+      - PORT=8501
+    volumes:
+      - dashboard_data:/app/shared_data
+    restart: unless-stopped
+
+volumes:
+  dashboard_data:
+    driver: local

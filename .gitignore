@@ -1,5 +1,24 @@
+# Environment files (Secrets)
 .env
+.env.local
+.env.*.local
+
+# Python cache & build artifacts
 __pycache__/
 *.pyc
-shared_data/
+*.pyo
+*.pyd
 .venv/
+venv/
+ENV/
+
+# Data & SQLite databases
+shared_data/
+*.db
+*.sqlite
+*.sqlite3
+
+# IDE / System
+.DS_Store
+.vscode/
+.idea/
